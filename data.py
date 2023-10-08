@@ -28,14 +28,15 @@ class ResizeAspectRatio:
         # Crop down from the top left corner
         return F.crop(img, 0, 0, self.size[1], self.size[0])
  
+def get_data(size):
 
-targetw, targeth = 1080, 1080
-stats = (0.5, 0.5, 0.5), (0.5, 0.5, 0.5) # TODO: How can we improve these?
+    targetw, targeth = size, size 
+    stats = (0.5, 0.5, 0.5), (0.5, 0.5, 0.5) # TODO: How can we improve these?
 
-transform = T.Compose([
-    ResizeAspectRatio(targetw, targeth),
-    T.ToTensor(),
-    T.Normalize(*stats)
-])
+    transform = T.Compose([
+        ResizeAspectRatio(targetw, targeth),
+        T.ToTensor(),
+        T.Normalize(*stats)
+    ])
 
-data = ImageFolder("./data", transform)
+    return ImageFolder("./data", transform)
