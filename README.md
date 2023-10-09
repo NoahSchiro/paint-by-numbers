@@ -22,6 +22,8 @@ And here is a few more samples:
 
 ![](./assets/test1samples.png)
 
+This model took about 1.5 hours to train on a NVIDIA MX350.
+
 ## Test 2 (128x128 images, 200 epochs)
 
 I doubled the width and height of the images and trained for twice the length. I think that the model could go to 250 or 300 epochs ideally. The target resolution is 1024x1024, but to do this, we need to train on a cloud compute platform. 
@@ -31,3 +33,5 @@ Crucially, I also adjusted the learning rate of the generator to be much faster 
 Here are some samples from this run. I think they are much better than test 1, but there is still a ways to go.
 
 ![](./assets/test2samples.png)
+
+This model took about 14.7 hours to train on a NVIDIA MX350.
