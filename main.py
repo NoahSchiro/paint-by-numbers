@@ -3,6 +3,8 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torchvision.utils import save_image
 
+import time
+
 from data import get_data
 from models import Discriminator, Generator
 
@@ -11,16 +13,17 @@ from models import Discriminator, Generator
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
 # This is the size of the output image
-IMAGE_SIZE  = 64
-LATENT_SIZE = 128
+IMAGE_SIZE  = 128
+LATENT_SIZE = 256
 STATS       = (0.5, 0.5, 0.5), (0.5, 0.5, 0.5) # TODO: How can we improve these?
 
 # Theres a tweet by Yann LeCun that says your
 # batch size likely never needs to be larger than
 # 32
 BATCH_SIZE = 32
-EPOCHS     = 100
-LR         = 2e-4
+EPOCHS     = 200
+LR_D       = 1e-4
+LR_G       = 1e-3
 
 static_latent = torch.randn(1, LATENT_SIZE, device=DEVICE)
 def save_img(g, dir, epoch):
@@ -42,10 +45,12 @@ def train(g, d, dl, dir):
     loss_g = []
     
     # Create optimizers
-    opt_d = torch.optim.Adam(d.parameters(), lr=LR, betas=(0.5, 0.999))
-    opt_g = torch.optim.Adam(g.parameters(), lr=LR, betas=(0.5, 0.999))
+    opt_d = torch.optim.Adam(d.parameters(), lr=LR_D, betas=(0.5, 0.999))
+    opt_g = torch.optim.Adam(g.parameters(), lr=LR_G, betas=(0.5, 0.999))
 
     for epoch in range(1, EPOCHS):
+
+        start = time.time()
 
         for batch, (real_imgs, _) in enumerate(dl):
 
@@ -103,6 +108,9 @@ def train(g, d, dl, dir):
         # At the end of an epoch, try saving an image
         save_img(g, dir, epoch)
 
+        stop = time.time()
+        print(f"Time to complete epoch: {stop - start}s")
+
     return loss_d, loss_g
 
 
@@ -129,10 +137,12 @@ if __name__=="__main__":
     # Testing generator
     g = Generator(LATENT_SIZE, IMAGE_SIZE).to(DEVICE)
 
+    save_dir = f"models/img_{IMAGE_SIZE}x{IMAGE_SIZE}_epochs{EPOCHS}/"
+
     # Train
-    loss_d, loss_g = train(g, d, dl, "models/test2/")
+    loss_d, loss_g = train(g, d, dl, save_dir)
 
     # Save the model states
-    save("models/", g, d, loss_d, loss_g)
+    save(save_dir, g, d, loss_d, loss_g)
 
    
