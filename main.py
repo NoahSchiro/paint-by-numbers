@@ -1,59 +1,75 @@
 import torch
-from torch.nn import functional as F 
+from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from torchvision.utils import save_image
 
 import time
+from datetime import timedelta
+import os
+import logging
 
 from data import get_data
 from models import Discriminator, Generator
 
 ############ HYPER PARAMETERS ######################
 
-DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 # This is the size of the output image
-IMAGE_SIZE  = 128
+IMAGE_SIZE = 128
 LATENT_SIZE = 256
-STATS       = (0.5, 0.5, 0.5), (0.5, 0.5, 0.5) # TODO: How can we improve these?
+STATS = (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)  # TODO: How can we improve these?
 
-# Theres a tweet by Yann LeCun that says your
-# batch size likely never needs to be larger than
-# 32
-BATCH_SIZE = 32
-EPOCHS     = 200
-LR_D       = 1e-4
-LR_G       = 1e-3
+BATCH_SIZE = 32  # Generally does not need to be > 32
+EPOCHS = 300
+LR_D = 1e-4
+LR_G = 1e-3
 
+# Where we will save our model to
+save_dir = f"models/img_{IMAGE_SIZE}x{IMAGE_SIZE}_epochs{EPOCHS}/"
+if not os.path.exists(save_dir):
+    os.makedirs(save_dir)
+
+# Set up a logging system
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    handlers=[logging.FileHandler(f"{save_dir}log.txt"), logging.StreamHandler()],
+)
+
+# We set up a random vector to see how the model progresses over time
 static_latent = torch.randn(1, LATENT_SIZE, device=DEVICE)
-def save_img(g, dir, epoch):
 
+
+def save_img(g, epoch):
     def denorm(img_tensors):
-            return img_tensors * STATS[1][0] + STATS[0][0]
+        return img_tensors * STATS[1][0] + STATS[0][0]
+
     g.eval()
     img = denorm(g(static_latent))
     g.train()
-    save_image(img, f"{dir}/epoch{epoch}.png")
- 
+    save_image(img, f"{save_dir}/epoch{epoch}.png")
 
-def train(g, d, dl, dir):
-    
+
+def train(g, d, dl):
     torch.cuda.empty_cache()
 
-    # Save discriminator / generator losses
-    loss_d = []
-    loss_g = []
-    
     # Create optimizers
     opt_d = torch.optim.Adam(d.parameters(), lr=LR_D, betas=(0.5, 0.999))
     opt_g = torch.optim.Adam(g.parameters(), lr=LR_G, betas=(0.5, 0.999))
 
-    for epoch in range(1, EPOCHS):
+    global_start = time.time()
 
+    for epoch in range(1, EPOCHS):
         start = time.time()
 
-        for batch, (real_imgs, _) in enumerate(dl):
+        logging.info(f"EPOCH {epoch}")
 
+        # Accumulate loss
+        loss_d_acc = 0.0
+        loss_g_acc = 0.0
+
+        for batch, (real_imgs, _) in enumerate(dl):
             real_imgs = real_imgs.to(DEVICE)
 
             # Clear gradients
@@ -61,16 +77,16 @@ def train(g, d, dl, dir):
 
             # Pass real images through discriminator (we are expecting discriminator
             # to say "1" for all these)
-            real_preds   = d(real_imgs)
+            real_preds = d(real_imgs)
             real_targets = torch.ones(real_imgs.size(0), 1, device=DEVICE)
-            real_loss    = F.binary_cross_entropy(real_preds, real_targets)
-            
+            real_loss = F.binary_cross_entropy(real_preds, real_targets)
+
             # Generate fake images
             latent = torch.randn(BATCH_SIZE, LATENT_SIZE, device=DEVICE)
             fake_images = g(latent)
 
             # Pass fake images through discriminator (we are expecting discriminator
-            # to say "0" for all these
+            # to say "0" for all these)
             fake_targets = torch.zeros(fake_images.size(0), 1, device=DEVICE)
             fake_preds = d(fake_images)
             fake_loss = F.binary_cross_entropy(fake_preds, fake_targets)
@@ -82,54 +98,62 @@ def train(g, d, dl, dir):
             loss.backward()
             opt_d.step()
 
-            print(f"Epoch: {epoch}; Batch: {batch}/{len(dl)}")
-            print(f"D loss: {loss.item():.4f};", end=' ')
-            loss_d.append(loss.item())
+            # Accumulate a loss
+            loss_d_acc += loss.item()
 
             # Clear generator gradients
             opt_g.zero_grad()
-            
+
             # Generate fake images with random vector
             latent = torch.randn(BATCH_SIZE, LATENT_SIZE, device=DEVICE)
             fake_images = g(latent)
-            
+
             # Try to fool the discriminator
-            preds   = d(fake_images)
+            preds = d(fake_images)
             targets = torch.ones(BATCH_SIZE, 1, device=DEVICE)
-            loss    = F.binary_cross_entropy(preds, targets)
-            
+            loss = F.binary_cross_entropy(preds, targets)
+
             # Update generator weights
             loss.backward()
             opt_g.step()
-            
-            print(f"G loss: {loss.item():.4f}")
-            loss_g.append(loss.item())
 
-        # At the end of an epoch, try saving an image
-        save_img(g, dir, epoch)
+            # Accumulate a loss
+            loss_g_acc += loss.item()
+
+            # Do some reporting
+            if batch % 10 == 0:
+                logging.info(f"Batch {batch}/{len(dl)}\n")
+
+                # Compute loss average
+                loss_g = loss_g_acc / 10
+                loss_d = loss_d_acc / 10
+
+                # Reset the accumulation for the next round
+                loss_g_acc = 0.0
+                loss_d_acc = 0.0
+                logging.info(f"Avg Gen Loss: {loss_g:.3f}")
+                logging.info(f"Avg Dis Loss: {loss_d:.3f}\n")
+        # At the end of an epoch, save an image
+        save_img(g, epoch)
 
         stop = time.time()
-        print(f"Time to complete epoch: {stop - start}s")
+        time_since = timedelta(seconds=(stop - global_start))
+        epoch_time = timedelta(seconds=(stop - start))
+        remaining = epoch_time * (EPOCHS - epoch)
+        logging.info(f"Running time: {str(time_since):.2f}")
+        logging.info(f"Epoch time:   {str(epoch_time):.2f}")
+        logging.info(f"ETA:          {str(remaining):.2f}")
 
-    return loss_d, loss_g
 
-
-def save(dir, g, d, loss_g, loss_d):
-    # Save the models out
-    torch.save(g.state_dict(), f"{dir}generator.pth")
-    torch.save(d.state_dict(), f"{dir}discriminator.pth")
-    
-if __name__=="__main__":
-
+if __name__ == "__main__":
     data = get_data(IMAGE_SIZE, STATS)
 
     dl = DataLoader(data, BATCH_SIZE, shuffle=True)
 
-    print("Starting...")
-    print(f"Dataset size:    {len(data)}")
-    print(f"Dataloader size: {len(dl)}")
-    print(f"Image size:      {IMAGE_SIZE}x{IMAGE_SIZE}")
-    print(f"Device:          {DEVICE}")
+    logging.info(f"Dataset size:    {len(data)}")
+    logging.info(f"Dataloader size: {len(dl)}")
+    logging.info(f"Image size:      {IMAGE_SIZE}x{IMAGE_SIZE}")
+    logging.info(f"Device:          {DEVICE}")
 
     # Testing discriminator
     d = Discriminator(IMAGE_SIZE).to(DEVICE)
@@ -137,12 +161,9 @@ if __name__=="__main__":
     # Testing generator
     g = Generator(LATENT_SIZE, IMAGE_SIZE).to(DEVICE)
 
-    save_dir = f"models/img_{IMAGE_SIZE}x{IMAGE_SIZE}_epochs{EPOCHS}/"
-
     # Train
-    loss_d, loss_g = train(g, d, dl, save_dir)
+    train(g, d, dl)
 
     # Save the model states
-    save(save_dir, g, d, loss_d, loss_g)
-
-   
+    torch.save(g.state_dict(), f"{save_dir}generator.pth")
+    torch.save(d.state_dict(), f"{save_dir}discriminator.pth")
