@@ -8,8 +8,8 @@ from datetime import timedelta
 import os
 import logging
 
-from data import get_data
-from models import Discriminator, Generator
+from src.data import get_data
+from src.models import Discriminator, Generator
 
 ############ HYPER PARAMETERS ######################
 
