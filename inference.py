@@ -5,8 +5,8 @@ from models import Generator
 
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 FILE_PATH = "./models/img_128x128_epochs200/generator.pth"
-LATENT_SIZE = 256
-IMAGE_SIZE  = 128
+LATENT_SIZE = 248
+IMAGE_SIZE  = 512
 STATS       = (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)
 
 @torch.no_grad()

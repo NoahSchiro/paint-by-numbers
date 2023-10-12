@@ -140,15 +140,17 @@ def train(g, d, dl):
         time_since = timedelta(seconds=(stop - global_start))
         epoch_time = timedelta(seconds=(stop - start))
         remaining = epoch_time * (EPOCHS - epoch)
-        logging.info(f"Running time: {str(time_since):.2f}")
-        logging.info(f"Epoch time:   {str(epoch_time):.2f}")
-        logging.info(f"ETA:          {str(remaining):.2f}")
+        logging.info(f"Running time: {str(time_since)}")
+        logging.info(f"Epoch time:   {str(epoch_time)}")
+        logging.info(f"ETA:          {str(remaining)}")
 
 
 if __name__ == "__main__":
     data = get_data(IMAGE_SIZE, STATS)
 
-    dl = DataLoader(data, BATCH_SIZE, shuffle=True)
+    # I have 8 cpu cores so 8 workers I guess. May
+    # need to decrease this if memory is an issue
+    dl = DataLoader(data, BATCH_SIZE, num_workers=8, pin_memory=True, shuffle=True)
 
     logging.info(f"Dataset size:    {len(data)}")
     logging.info(f"Dataloader size: {len(dl)}")
