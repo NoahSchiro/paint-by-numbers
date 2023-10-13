@@ -133,8 +133,13 @@ def train(g, d, dl):
                 loss_d_acc = 0.0
                 logging.info(f"Avg Gen Loss: {loss_g:.3f}")
                 logging.info(f"Avg Dis Loss: {loss_d:.3f}\n")
-        # At the end of an epoch, save an image
-        save_img(g, epoch)
+
+        if epoch % 20 == 0:
+            # Save an image
+            save_img(g, epoch)
+            # Save the model states
+            torch.save(g.state_dict(), f"{save_dir}generator{epoch}.pth")
+            torch.save(d.state_dict(), f"{save_dir}discriminator{epoch}.pth")
 
         stop = time.time()
         time_since = timedelta(seconds=(stop - global_start))
@@ -167,5 +172,5 @@ if __name__ == "__main__":
     train(g, d, dl)
 
     # Save the model states
-    torch.save(g.state_dict(), f"{save_dir}generator.pth")
-    torch.save(d.state_dict(), f"{save_dir}discriminator.pth")
+    torch.save(g.state_dict(), f"{save_dir}generator_final.pth")
+    torch.save(d.state_dict(), f"{save_dir}discriminator_final.pth")
