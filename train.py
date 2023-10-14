@@ -20,7 +20,7 @@ IMAGE_SIZE = 128
 LATENT_SIZE = 256
 STATS = (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)  # TODO: How can we improve these?
 
-BATCH_SIZE = 32  # Generally does not need to be > 32
+BATCH_SIZE = 32 # Generally does not need to be > 32
 EPOCHS = 300
 LR_D = 1e-4
 LR_G = 1e-3
@@ -55,12 +55,12 @@ def train(g, d, dl):
     torch.cuda.empty_cache()
 
     # Create optimizers
-    opt_d = torch.optim.Adam(d.parameters(), lr=LR_D, betas=(0.5, 0.999))
-    opt_g = torch.optim.Adam(g.parameters(), lr=LR_G, betas=(0.5, 0.999))
+    opt_d = torch.optim.Adam(d.parameters(), lr=LR_D, betas=(0.6, 0.999))
+    opt_g = torch.optim.Adam(g.parameters(), lr=LR_G, betas=(0.6, 0.999))
 
     global_start = time.time()
 
-    for epoch in range(1, EPOCHS):
+    for epoch in range(1, EPOCHS+1):
         start = time.time()
 
         logging.info(f"EPOCH {epoch}")
@@ -160,6 +160,7 @@ if __name__ == "__main__":
     logging.info(f"Dataset size:    {len(data)}")
     logging.info(f"Dataloader size: {len(dl)}")
     logging.info(f"Image size:      {IMAGE_SIZE}x{IMAGE_SIZE}")
+    logging.info(f"Latent size:     {LATENT_SIZE}")
     logging.info(f"Device:          {DEVICE}")
 
     # Testing discriminator
