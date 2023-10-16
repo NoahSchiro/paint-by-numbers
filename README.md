@@ -35,3 +35,15 @@ Here are some samples from this run. I think they are much better than test 1, b
 ![](./assets/test2samples.png)
 
 This model took about 14.7 hours to train on a NVIDIA MX350.
+
+## Test 3 (256x256 images, 300 epochs)
+
+We had to spin up some AWS resources for this one, but there isn't any monumental leaps from the last model. Just increased the size and the training time. Took 14.5 hours on a NVIDIA K80.
+
+These are some of the better photos, but in general you will notice some splotchy photos here. I think this could be due to the network being too small or Adam learning rate decayed too quickly.
+
+![](./assets/test3sample1.png)
+
+![](./assets/test3sample2.png)
+
+![](./assets/test3sampels.png)
