@@ -14,14 +14,15 @@ from src.models import Discriminator, Generator
 ############ HYPER PARAMETERS ######################
 
 DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+torch.set_default_device(DEVICE)
 
 # This is the size of the output image
-IMAGE_SIZE = 256 
+IMAGE_SIZE = 128
 LATENT_SIZE = 256
 STATS = (0.5229942, 0.48899996, 0.41180329), (0.25899375, 0.24669976, 0.25502672)
 
 BATCH_SIZE = 32 # Generally does not need to be > 32
-EPOCHS = 300
+EPOCHS = 500
 LR_D = 1e-4
 LR_G = 1e-3
 
@@ -38,7 +39,7 @@ logging.basicConfig(
 )
 
 # We set up a random vector to see how the model progresses over time
-static_latent = torch.randn(1, LATENT_SIZE, device=DEVICE)
+static_latent = torch.randn(1, LATENT_SIZE)
 
 
 def save_img(g, epoch):
@@ -70,7 +71,7 @@ def train(g, d, dl):
         loss_g_acc = 0.0
 
         for batch, (real_imgs, _) in enumerate(dl):
-            real_imgs = real_imgs.to(DEVICE)
+            real_imgs = real_imgs
 
             # Clear gradients
             opt_d.zero_grad()
@@ -78,16 +79,16 @@ def train(g, d, dl):
             # Pass real images through discriminator (we are expecting discriminator
             # to say "1" for all these)
             real_preds = d(real_imgs)
-            real_targets = torch.ones(real_imgs.size(0), 1, device=DEVICE)
+            real_targets = torch.ones(real_imgs.size(0), 1)
             real_loss = F.binary_cross_entropy(real_preds, real_targets)
 
             # Generate fake images
-            latent = torch.randn(BATCH_SIZE, LATENT_SIZE, device=DEVICE)
+            latent = torch.randn(BATCH_SIZE, LATENT_SIZE)
             fake_images = g(latent)
 
             # Pass fake images through discriminator (we are expecting discriminator
             # to say "0" for all these)
-            fake_targets = torch.zeros(fake_images.size(0), 1, device=DEVICE)
+            fake_targets = torch.zeros(fake_images.size(0), 1)
             fake_preds = d(fake_images)
             fake_loss = F.binary_cross_entropy(fake_preds, fake_targets)
 
@@ -105,12 +106,12 @@ def train(g, d, dl):
             opt_g.zero_grad()
 
             # Generate fake images with random vector
-            latent = torch.randn(BATCH_SIZE, LATENT_SIZE, device=DEVICE)
+            latent = torch.randn(BATCH_SIZE, LATENT_SIZE)
             fake_images = g(latent)
 
             # Try to fool the discriminator
             preds = d(fake_images)
-            targets = torch.ones(BATCH_SIZE, 1, device=DEVICE)
+            targets = torch.ones(BATCH_SIZE, 1)
             loss = F.binary_cross_entropy(preds, targets)
 
             # Update generator weights
@@ -161,13 +162,15 @@ if __name__ == "__main__":
     logging.info(f"Dataloader size: {len(dl)}")
     logging.info(f"Image size:      {IMAGE_SIZE}x{IMAGE_SIZE}")
     logging.info(f"Latent size:     {LATENT_SIZE}")
+    logging.info(f"Batch size:      {BATCH_SIZE}")
+    logging.info(f"Epochs:          {EPOCHS}")
     logging.info(f"Device:          {DEVICE}")
 
     # Testing discriminator
-    d = Discriminator(IMAGE_SIZE).to(DEVICE)
+    d = Discriminator(IMAGE_SIZE)
 
     # Testing generator
-    g = Generator(LATENT_SIZE, IMAGE_SIZE).to(DEVICE)
+    g = Generator(LATENT_SIZE, IMAGE_SIZE)
 
     # Train
     train(g, d, dl)

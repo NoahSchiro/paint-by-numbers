@@ -4,16 +4,17 @@ from torchvision.utils import save_image
 from src.models import Generator
 
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+torch.set_default_device(DEVICE)
 FILE_PATH = "./models/img_128x128_epochs300/generator300.pth"
-LATENT_SIZE = 256
-IMAGE_SIZE  = 128
+LATENT_SIZE = 128
+IMAGE_SIZE  = 64
 STATS       = (0.5229942, 0.48899996, 0.41180329), (0.25899375, 0.24669976, 0.25502672)
 
 @torch.no_grad()
 def save_img(g, id):
 
     # Create a random vector
-    static_latent = torch.randn(1, LATENT_SIZE, device=DEVICE)
+    static_latent = torch.randn(1, LATENT_SIZE)
 
     def denorm(img_tensors):
         return img_tensors * STATS[1][0] + STATS[0][0]
@@ -29,8 +30,8 @@ if __name__=="__main__":
     torch.cuda.empty_cache()
 
     with torch.no_grad():
-        model = Generator(LATENT_SIZE, IMAGE_SIZE).to(DEVICE)
-        model.load_state_dict(torch.load(FILE_PATH, map_location=DEVICE))
+        model = Generator(LATENT_SIZE, IMAGE_SIZE)
+        model.load_state_dict(torch.load(FILE_PATH))
 
         model.eval()
         print("Model loaded")
