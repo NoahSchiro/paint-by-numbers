@@ -14,13 +14,16 @@ from src.models import Discriminator, Generator
 ############ HYPER PARAMETERS ######################
 
 DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+DEVICE_STR = "cuda" if torch.cuda.is_available() else "cpu"
+SCALER_D = torch.cuda.amp.GradScaler()
+SCALER_G = torch.cuda.amp.GradScaler()
 
 # This is the size of the output image
 IMAGE_SIZE = 64
-LATENT_SIZE = 128
+LATENT_SIZE = 32
 STATS = (0.5229942, 0.48899996, 0.41180329), (0.25899375, 0.24669976, 0.25502672)
 
-BATCH_SIZE = 32 # Generally does not need to be > 32
+BATCH_SIZE = 2 # Generally does not need to be > 32
 EPOCHS = 500
 LR_D = 1e-4
 LR_G = 1e-3
@@ -46,7 +49,8 @@ def save_img(g, epoch):
         return img_tensors * STATS[1][0] + STATS[0][0]
 
     g.eval()
-    img = denorm(g(static_latent))
+    with torch.autocast(device_type=DEVICE_STR, dtype=torch.float16):
+        img = denorm(g(static_latent))
     g.train()
     save_image(img, f"{save_dir}/epoch{epoch}.png")
 
@@ -77,26 +81,31 @@ def train(g, d, dl):
 
             # Pass real images through discriminator (we are expecting discriminator
             # to say "1" for all these)
-            real_preds = d(real_imgs)
-            real_targets = torch.ones(real_imgs.size(0), 1, device=DEVICE)
-            real_loss = F.binary_cross_entropy(real_preds, real_targets)
+            with torch.autocast(device_type=DEVICE_STR, dtype=torch.float16):
 
-            # Generate fake images
-            latent = torch.randn(BATCH_SIZE, LATENT_SIZE, device=DEVICE)
-            fake_images = g(latent)
+                real_preds = d(real_imgs)
+                real_targets = torch.ones(real_imgs.size(0), 1, device=DEVICE)
+                real_loss = F.binary_cross_entropy_with_logits(real_preds, real_targets)
 
-            # Pass fake images through discriminator (we are expecting discriminator
-            # to say "0" for all these)
-            fake_targets = torch.zeros(fake_images.size(0), 1, device=DEVICE)
-            fake_preds = d(fake_images)
-            fake_loss = F.binary_cross_entropy(fake_preds, fake_targets)
+                # Generate fake images
+                latent = torch.randn(BATCH_SIZE, LATENT_SIZE, device=DEVICE)
+                fake_images = g(latent)
 
-            # Update discriminator weights. Note this is dependent on the
-            # discriminators ability to tell the difference between real and fake
-            # so we need to combine these losses
-            loss = real_loss + fake_loss
-            loss.backward()
-            opt_d.step()
+                # Pass fake images through discriminator (we are expecting discriminator
+                # to say "0" for all these)
+                fake_targets = torch.zeros(fake_images.size(0), 1, device=DEVICE)
+                fake_preds = d(fake_images)
+                fake_loss = F.binary_cross_entropy_with_logits(fake_preds, fake_targets)
+
+                # Update discriminator weights. Note this is dependent on the
+                # discriminators ability to tell the difference between real and fake
+                # so we need to combine these losses
+                loss = real_loss + fake_loss
+
+            # Update the discriminator weights (with the grad scaler for mixed precision)
+            SCALER_D.scale(loss).backward()
+            SCALER_D.step(opt_d)
+            SCALER_D.update()
 
             # Accumulate a loss
             loss_d_acc += loss.item()
@@ -105,17 +114,19 @@ def train(g, d, dl):
             opt_g.zero_grad()
 
             # Generate fake images with random vector
-            latent = torch.randn(BATCH_SIZE, LATENT_SIZE, device=DEVICE)
-            fake_images = g(latent)
+            with torch.autocast(device_type=DEVICE_STR, dtype=torch.float16):
+                latent = torch.randn(BATCH_SIZE, LATENT_SIZE, device=DEVICE)
+                fake_images = g(latent)
 
-            # Try to fool the discriminator
-            preds = d(fake_images)
-            targets = torch.ones(BATCH_SIZE, 1, device=DEVICE)
-            loss = F.binary_cross_entropy(preds, targets)
+                # Try to fool the discriminator
+                preds = d(fake_images)
+                targets = torch.ones(BATCH_SIZE, 1, device=DEVICE)
+                loss = F.binary_cross_entropy_with_logits(preds, targets)
 
-            # Update generator weights
-            loss.backward()
-            opt_g.step()
+            # Update generator weights (with the grad scaler, this is mixed precision stuff)
+            SCALER_G.scale(loss).backward()
+            SCALER_G.step(opt_g)
+            SCALER_G.update()
 
             # Accumulate a loss
             loss_g_acc += loss.item()
