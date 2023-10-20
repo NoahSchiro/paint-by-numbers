@@ -16,9 +16,9 @@ from src.models import Discriminator, Generator
 DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 # This is the size of the output image
-IMAGE_SIZE = 128
+IMAGE_SIZE = 256 
 LATENT_SIZE = 256
-STATS = (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)  # TODO: How can we improve these?
+STATS = (0.5229942, 0.48899996, 0.41180329), (0.25899375, 0.24669976, 0.25502672)
 
 BATCH_SIZE = 32 # Generally does not need to be > 32
 EPOCHS = 300
@@ -55,8 +55,8 @@ def train(g, d, dl):
     torch.cuda.empty_cache()
 
     # Create optimizers
-    opt_d = torch.optim.Adam(d.parameters(), lr=LR_D, betas=(0.6, 0.999))
-    opt_g = torch.optim.Adam(g.parameters(), lr=LR_G, betas=(0.6, 0.999))
+    opt_d = torch.optim.Adam(d.parameters(), lr=LR_D)
+    opt_g = torch.optim.Adam(g.parameters(), lr=LR_G)
 
     global_start = time.time()
 

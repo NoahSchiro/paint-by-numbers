@@ -7,7 +7,7 @@ DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cp
 FILE_PATH = "./models/img_128x128_epochs300/generator300.pth"
 LATENT_SIZE = 256
 IMAGE_SIZE  = 128
-STATS       = (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)
+STATS       = (0.5229942, 0.48899996, 0.41180329), (0.25899375, 0.24669976, 0.25502672)
 
 @torch.no_grad()
 def save_img(g, id):
