@@ -10,3 +10,24 @@ Much of Andy Warhol's work had to do with the industrialization and commercializ
 Some of my favorite paintings is a lesser-known series by Warhol, titled *Do It Yourself*. In particular I really enjoy *Do It Yourself (Sailboat)* (depited above). This series of painting was a critique (or perhaps in reverence of) [paint by numbers kits](https://en.wikipedia.org/wiki/Paint_by_number), which were sold so that people could make art at home. While the concept of paint by numbers ties into the commodification of art as a whole, it also brings up questions of orginiality and creativity. What is art if it's as simple as painting by numbers?
 
 Flow Matching neural networks take a vector of random numbers as input, and output whatever they were trained to produce. In this repository, I will be training them to create impressionist paintings - to paint by numbers.
+
+### Strategy
+
+First pre-train the model on imagenet, then focus on impressionist paintings. There aren't many paintings (under 10k), so we don't really have a sufficient dataset to work with. However, using imagenet should get the model to learn the general form of images before focusing on stylistic fine-tuning.
+
+## Data
+
+Data was pulled from [kaggle](https://www.kaggle.com/c/imagenet-object-localization-challenge/overview/description). This is just a subset of imagenet, but it does contain about 1.4 million images, which is enough for pre-training.
+
+Next we want to resample the images to the right size. Within the directory structure of that data, we only care about `ILSCRC/Data/CLS-LOC/` which I have extracted to a folder called `imagenet`.
+
+The size I am targeting is 512. 
+
+```bash
+uv run scripts/image_resizer_imagent.py -i ./data/imagenet/ -o ./data/imagenet512/ -s 512 -a box -r -j 10
+```
+
+## Acknowledgment
+
+* The code for this repo was initially based off of the [flow matching repo from facebook research](https://github.com/facebookresearch/flow_matching).
+* Patryk Chrabaszcz wrote the image preprocessing script. Go check out his [repo](https://github.com/PatrykChrabaszcz/Imagenet32_Scripts).

@@ -5,3 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
+
+[dependency-groups]
+dev = [
+    "pillow>=11.3.0",
+]
