@@ -1,6 +1,7 @@
 # Data directory, model directory
 data/
 models/
+output_dir/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

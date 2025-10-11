@@ -4,7 +4,15 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "flow-matching>=1.0.10",
+    "numpy>=2.3.3",
+    "torch>=2.8.0",
+    "torchdiffeq>=0.2.5",
+    "torchmetrics[image]>=1.8.2",
+    "torchvision>=0.23.0",
+    "tqdm>=4.67.1",
+]
 
 [dependency-groups]
 dev = [

@@ -17,7 +17,7 @@ First pre-train the model on imagenet, then focus on impressionist paintings. Th
 
 ## Data
 
-Data was pulled from [kaggle](https://www.kaggle.com/c/imagenet-object-localization-challenge/overview/description). This is just a subset of imagenet, but it does contain about 1.4 million images, which is enough for pre-training.
+Data was pulled from [kaggle](https://www.kaggle.com/c/imagenet-object-localization-challenge/overview/description). This is just a subset of imagenet, but it does contain about 1.4 million images, which is enough for pre-training. Note that the images are in a nested structure for class conditional generation. I am interested in unconditional class generation, so I flattened this structure out before running the image resizer script (which does not recursively go into the `train` `test` and `val` folders).
 
 Next we want to resample the images to the right size. Within the directory structure of that data, we only care about `ILSCRC/Data/CLS-LOC/` which I have extracted to a folder called `imagenet`.
 
@@ -27,7 +27,7 @@ The size I am targeting is 512.
 uv run scripts/image_resizer_imagent.py -i ./data/imagenet/ -o ./data/imagenet512/ -s 512 -a box -r -j 10
 ```
 
-## Acknowledgment
+## Acknowledgment and licenses
 
-* The code for this repo was initially based off of the [flow matching repo from facebook research](https://github.com/facebookresearch/flow_matching).
-* Patryk Chrabaszcz wrote the image preprocessing script. Go check out his [repo](https://github.com/PatrykChrabaszcz/Imagenet32_Scripts).
+* The code for this repo was initially based off of the [flow matching repo from facebook research](https://github.com/facebookresearch/flow_matching). Both Meta's project and this one are licensed under CC BY-NC 4.0 This code may only be used for noncommercial purposes and requires attribution of both Meta Inc. and Noah Schiro.
+* Patryk Chrabaszcz wrote the image preprocessing script and I made some modifications. Go check out his [repo](https://github.com/PatrykChrabaszcz/Imagenet32_Scripts). This code falls under MIT. See the header in `/image_resizer_imagent.py` for more information.
