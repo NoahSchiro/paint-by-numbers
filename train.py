@@ -1,177 +1,227 @@
-import torch
-from torch.nn import functional as F
-from torch.utils.data import DataLoader
-from torchvision.utils import save_image
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# Copyright (c) Noah Schiro, 2025 -- substantial modifications
+# All rights reserved.
+#
+# This source code is licensed under the CC-by-NC license found in the
+# LICENSE file in the root directory of this source tree.
+# Copyright (c) Meta Platforms, Inc. and affiliates.
 
-import time
-from datetime import timedelta
-import os
+import datetime
+import json
 import logging
+import os
+import sys
+import time
+from pathlib import Path
 
-from src.data import get_data
-from src.models import Discriminator, Generator
+import numpy as np
+import torch
+import torch.backends.cudnn as cudnn
+import torchvision.datasets as datasets
+from PIL import ImageFile
+from src.models.model_configs import instantiate_model
+from src.train_arg_parser import get_args_parser
 
-############ HYPER PARAMETERS ######################
+from src.training import distributed_mode
+from src.training.data_transform import get_train_transform
+from src.training.eval_loop import eval_model
+from src.training.grad_scaler import NativeScalerWithGradNormCount as NativeScaler
+from src.training.load_and_save import load_model, save_model
+from src.training.train_loop import train_one_epoch
 
-DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-
-# This is the size of the output image
-IMAGE_SIZE = 128
-LATENT_SIZE = 256
-STATS = (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)  # TODO: How can we improve these?
-
-BATCH_SIZE = 32 # Generally does not need to be > 32
-EPOCHS = 300
-LR_D = 1e-4
-LR_G = 1e-3
-
-# Where we will save our model to
-save_dir = f"models/img_{IMAGE_SIZE}x{IMAGE_SIZE}_epochs{EPOCHS}/"
-if not os.path.exists(save_dir):
-    os.makedirs(save_dir)
-
-# Set up a logging system
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    handlers=[logging.FileHandler(f"{save_dir}log.txt"), logging.StreamHandler()],
-)
-
-# We set up a random vector to see how the model progresses over time
-static_latent = torch.randn(1, LATENT_SIZE, device=DEVICE)
+logger = logging.getLogger(__name__)
 
 
-def save_img(g, epoch):
-    def denorm(img_tensors):
-        return img_tensors * STATS[1][0] + STATS[0][0]
+def main(args):
+    logging.basicConfig(
+        level=logging.INFO,
+        stream=sys.stdout,
+        format="%(asctime)s %(levelname)-8s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    distributed_mode.init_distributed_mode(args)
 
-    g.eval()
-    img = denorm(g(static_latent))
-    g.train()
-    save_image(img, f"{save_dir}/epoch{epoch}.png")
+    logger.info("job dir: {}".format(os.path.dirname(os.path.realpath(__file__))))
+    logger.info("{}".format(args).replace(", ", ",\n"))
+    if distributed_mode.is_main_process():
+        args_filepath = Path(args.output_dir) / "args.json"
+        logger.info(f"Saving args to {args_filepath}")
+        with open(args_filepath, "w") as f:
+            json.dump(vars(args), f)
 
+    device = torch.device(args.device)
 
-def train(g, d, dl):
-    torch.cuda.empty_cache()
+    # fix the seed for reproducibility
+    seed = args.seed + distributed_mode.get_rank()
+    torch.manual_seed(seed)
+    np.random.seed(seed)
 
-    # Create optimizers
-    opt_d = torch.optim.Adam(d.parameters(), lr=LR_D, betas=(0.6, 0.999))
-    opt_g = torch.optim.Adam(g.parameters(), lr=LR_G, betas=(0.6, 0.999))
+    cudnn.benchmark = True
 
-    global_start = time.time()
+    logger.info(f"Initializing Dataset: {args.dataset}")
+    transform_train = get_train_transform()
+    if args.dataset == "imagenet":
+        dataset_train = datasets.ImageFolder(args.data_path, transform=transform_train)
+    elif args.dataset == "cifar10":
+        ataset_train = datasets.CIFAR10(
+            root=args.data_path,
+            train=True,
+            download=True,
+            transform=transform_train,
+        )
+    else:
+        raise NotImplementedError(f"Unsupported dataset {args.dataset}")
 
-    for epoch in range(1, EPOCHS+1):
-        start = time.time()
+    logger.info(dataset_train)
 
-        logging.info(f"EPOCH {epoch}")
+    logger.info("Intializing DataLoader")
+    num_tasks = distributed_mode.get_world_size()
+    global_rank = distributed_mode.get_rank()
+    sampler_train = torch.utils.data.DistributedSampler(
+        dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
+    )
+    data_loader_train = torch.utils.data.DataLoader(
+        dataset_train,
+        sampler=sampler_train,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_mem,
+        drop_last=True,
+    )
+    logger.info(str(sampler_train))
 
-        # Accumulate loss
-        loss_d_acc = 0.0
-        loss_g_acc = 0.0
+    # define the model
+    logger.info("Initializing Model")
+    model = instantiate_model(
+        architechture=args.dataset,
+        is_discrete=args.discrete_flow_matching,
+        use_ema=args.use_ema,
+    )
 
-        for batch, (real_imgs, _) in enumerate(dl):
-            real_imgs = real_imgs.to(DEVICE)
+    model.to(device)
 
-            # Clear gradients
-            opt_d.zero_grad()
+    model_without_ddp = model
+    logger.info(str(model_without_ddp))
 
-            # Pass real images through discriminator (we are expecting discriminator
-            # to say "1" for all these)
-            real_preds = d(real_imgs)
-            real_targets = torch.ones(real_imgs.size(0), 1, device=DEVICE)
-            real_loss = F.binary_cross_entropy(real_preds, real_targets)
+    eff_batch_size = (
+        args.batch_size * args.accum_iter * distributed_mode.get_world_size()
+    )
 
-            # Generate fake images
-            latent = torch.randn(BATCH_SIZE, LATENT_SIZE, device=DEVICE)
-            fake_images = g(latent)
+    logger.info(f"Learning rate: {args.lr:.2e}")
 
-            # Pass fake images through discriminator (we are expecting discriminator
-            # to say "0" for all these)
-            fake_targets = torch.zeros(fake_images.size(0), 1, device=DEVICE)
-            fake_preds = d(fake_images)
-            fake_loss = F.binary_cross_entropy(fake_preds, fake_targets)
+    logger.info(f"Accumulate grad iterations: {args.accum_iter}")
+    logger.info(f"Effective batch size: {eff_batch_size}")
 
-            # Update discriminator weights. Note this is dependent on the
-            # discriminators ability to tell the difference between real and fake
-            # so we need to combine these losses
-            loss = real_loss + fake_loss
-            loss.backward()
-            opt_d.step()
+    if args.distributed:
+        model = torch.nn.parallel.DistributedDataParallel(
+            model, device_ids=[args.gpu], find_unused_parameters=True
+        )
+        model_without_ddp = model.module
 
-            # Accumulate a loss
-            loss_d_acc += loss.item()
+    optimizer = torch.optim.AdamW(
+        model_without_ddp.parameters(), lr=args.lr, betas=args.optimizer_betas
+    )
+    if args.decay_lr:
+        lr_schedule = torch.optim.lr_scheduler.LinearLR(
+            optimizer,
+            total_iters=args.epochs,
+            start_factor=1.0,
+            end_factor=1e-8 / args.lr,
+        )
+    else:
+        lr_schedule = torch.optim.lr_scheduler.ConstantLR(
+            optimizer, total_iters=args.epochs, factor=1.0
+        )
 
-            # Clear generator gradients
-            opt_g.zero_grad()
+    logger.info(f"Optimizer: {optimizer}")
+    logger.info(f"Learning-Rate Schedule: {lr_schedule}")
 
-            # Generate fake images with random vector
-            latent = torch.randn(BATCH_SIZE, LATENT_SIZE, device=DEVICE)
-            fake_images = g(latent)
+    loss_scaler = NativeScaler()
 
-            # Try to fool the discriminator
-            preds = d(fake_images)
-            targets = torch.ones(BATCH_SIZE, 1, device=DEVICE)
-            loss = F.binary_cross_entropy(preds, targets)
+    load_model(
+        args=args,
+        model_without_ddp=model_without_ddp,
+        optimizer=optimizer,
+        loss_scaler=loss_scaler,
+        lr_schedule=lr_schedule,
+    )
 
-            # Update generator weights
-            loss.backward()
-            opt_g.step()
+    logger.info(f"Start from {args.start_epoch} to {args.epochs} epochs")
+    start_time = time.time()
+    for epoch in range(args.start_epoch, args.epochs):
+        if args.distributed:
+            data_loader_train.sampler.set_epoch(epoch)
+        if not args.eval_only:
+            train_stats = train_one_epoch(
+                model=model,
+                data_loader=data_loader_train,
+                optimizer=optimizer,
+                lr_schedule=lr_schedule,
+                device=device,
+                epoch=epoch,
+                loss_scaler=loss_scaler,
+                args=args,
+            )
+            log_stats = {
+                **{f"train_{k}": v for k, v in train_stats.items()},
+                "epoch": epoch,
+            }
+        else:
+            log_stats = {
+                "epoch": epoch,
+            }
 
-            # Accumulate a loss
-            loss_g_acc += loss.item()
+        if args.output_dir and (
+            (args.eval_frequency > 0 and (epoch + 1) % args.eval_frequency == 0)
+            or args.eval_only
+            or args.test_run
+        ):
+            if not args.eval_only:
+                save_model(
+                    args=args,
+                    model=model,
+                    model_without_ddp=model_without_ddp,
+                    optimizer=optimizer,
+                    lr_schedule=lr_schedule,
+                    loss_scaler=loss_scaler,
+                    epoch=epoch,
+                )
+            if args.distributed:
+                data_loader_train.sampler.set_epoch(0)
+            if distributed_mode.is_main_process():
+                fid_samples = args.fid_samples - (num_tasks - 1) * (
+                    args.fid_samples // num_tasks
+                )
+            else:
+                fid_samples = args.fid_samples // num_tasks
+            eval_stats = eval_model(
+                model,
+                data_loader_train,
+                device,
+                epoch=epoch,
+                fid_samples=fid_samples,
+                args=args,
+            )
+            log_stats.update({f"eval_{k}": v for k, v in eval_stats.items()})
 
-            # Do some reporting
-            if batch % 10 == 0:
-                logging.info(f"Batch {batch}/{len(dl)}\n")
+        if args.output_dir and distributed_mode.is_main_process():
+            with open(
+                os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8"
+            ) as f:
+                f.write(json.dumps(log_stats) + "\n")
 
-                # Compute loss average
-                loss_g = loss_g_acc / 10
-                loss_d = loss_d_acc / 10
+        if args.test_run or args.eval_only:
+            break
 
-                # Reset the accumulation for the next round
-                loss_g_acc = 0.0
-                loss_d_acc = 0.0
-                logging.info(f"Avg Gen Loss: {loss_g:.3f}")
-                logging.info(f"Avg Dis Loss: {loss_d:.3f}\n")
-
-        if epoch % 20 == 0:
-            # Save an image
-            save_img(g, epoch)
-            # Save the model states
-            torch.save(g.state_dict(), f"{save_dir}generator{epoch}.pth")
-            torch.save(d.state_dict(), f"{save_dir}discriminator{epoch}.pth")
-
-        stop = time.time()
-        time_since = timedelta(seconds=(stop - global_start))
-        epoch_time = timedelta(seconds=(stop - start))
-        remaining = epoch_time * (EPOCHS - epoch)
-        logging.info(f"Running time: {str(time_since)}")
-        logging.info(f"Epoch time:   {str(epoch_time)}")
-        logging.info(f"ETA:          {str(remaining)}")
+    total_time = time.time() - start_time
+    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+    logger.info(f"Training time {total_time_str}")
 
 
 if __name__ == "__main__":
-    data = get_data(IMAGE_SIZE, STATS)
-
-    # I have 8 cpu cores so 8 workers I guess. May
-    # need to decrease this if memory is an issue
-    dl = DataLoader(data, BATCH_SIZE, num_workers=8, pin_memory=True, shuffle=True)
-
-    logging.info(f"Dataset size:    {len(data)}")
-    logging.info(f"Dataloader size: {len(dl)}")
-    logging.info(f"Image size:      {IMAGE_SIZE}x{IMAGE_SIZE}")
-    logging.info(f"Latent size:     {LATENT_SIZE}")
-    logging.info(f"Device:          {DEVICE}")
-
-    # Testing discriminator
-    d = Discriminator(IMAGE_SIZE).to(DEVICE)
-
-    # Testing generator
-    g = Generator(LATENT_SIZE, IMAGE_SIZE).to(DEVICE)
-
-    # Train
-    train(g, d, dl)
-
-    # Save the model states
-    torch.save(g.state_dict(), f"{save_dir}generator_final.pth")
-    torch.save(d.state_dict(), f"{save_dir}discriminator_final.pth")
+    ImageFile.LOAD_TRUNCATED_IMAGES = True
+    args = get_args_parser()
+    args = args.parse_args()
+    if args.output_dir:
+        Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    main(args)

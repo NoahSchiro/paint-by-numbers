@@ -1,6 +1,5 @@
 # paint-by-numbers
-Impressionist GAN in PyTorch
-
+Impressionist painting flow matching in PyTorch
 
 ## Introduction
 
@@ -10,40 +9,25 @@ Much of Andy Warhol's work had to do with the industrialization and commercializ
 
 Some of my favorite paintings is a lesser-known series by Warhol, titled *Do It Yourself*. In particular I really enjoy *Do It Yourself (Sailboat)* (depited above). This series of painting was a critique (or perhaps in reverence of) [paint by numbers kits](https://en.wikipedia.org/wiki/Paint_by_number), which were sold so that people could make art at home. While the concept of paint by numbers ties into the commodification of art as a whole, it also brings up questions of orginiality and creativity. What is art if it's as simple as painting by numbers?
 
-Generative Adverserial Networks (GANs) take a vector of random numbers as input, and output whatever they were trained to produce. In this repository, I will be training them to create impressionist paintings - to paint by numbers.
+Flow Matching neural networks take a vector of random numbers as input, and output whatever they were trained to produce. In this repository, I will be training them to create impressionist paintings - to paint by numbers.
 
-## Test 1 (64x64 images, 100 epochs)
+### Strategy
 
-As a first test, I wanted to get something running fairly fast, so I chose small images, a latent vector twice the size of the image (128 random numbers), and just 100 epochs. The results are somewhat okay. Ideally, I want higher resolution, and training to maybe 300 epochs. This was the random vector I was tracking progress on as the network trained to see how a static input evolves over time:
+First pre-train the model on imagenet, then focus on impressionist paintings. There aren't many paintings (under 10k), so we don't really have a sufficient dataset to work with. However, using imagenet should get the model to learn the general form of images before focusing on stylistic fine-tuning.
 
-![](./assets/test1.png)
+## Data
 
-And here is a few more samples:
+Data was pulled from [kaggle](https://www.kaggle.com/c/imagenet-object-localization-challenge/overview/description). This is just a subset of imagenet, but it does contain about 1.4 million images, which is enough for pre-training. Note that the images are in a nested structure for class conditional generation. I am interested in unconditional class generation, so I flattened this structure out before running the image resizer script (which does not recursively go into the `train` `test` and `val` folders).
 
-![](./assets/test1samples.png)
+Next we want to resample the images to the right size. Within the directory structure of that data, we only care about `ILSCRC/Data/CLS-LOC/` which I have extracted to a folder called `imagenet`.
 
-This model took about 1.5 hours to train on a NVIDIA MX350.
+The size I am targeting is 512. 
 
-## Test 2 (128x128 images, 200 epochs)
+```bash
+uv run scripts/image_resizer_imagent.py -i ./data/imagenet/ -o ./data/imagenet512/ -s 512 -a box -r -j 10
+```
 
-I doubled the width and height of the images and trained for twice the length. I think that the model could go to 250 or 300 epochs ideally. The target resolution is 1024x1024, but to do this, we need to train on a cloud compute platform. 
+## Acknowledgment and licenses
 
-Crucially, I also adjusted the learning rate of the generator to be much faster than the descriminator. This seems to strike a good balance between the two, though I noticed towards the end of the 200 epochs, the generator began to do worse at fooling the discriminator.
-
-Here are some samples from this run. I think they are much better than test 1, but there is still a ways to go.
-
-![](./assets/test2samples.png)
-
-This model took about 14.7 hours to train on a NVIDIA MX350.
-
-## Test 3 (256x256 images, 300 epochs)
-
-We had to spin up some AWS resources for this one, but there isn't any monumental leaps from the last model. Just increased the size and the training time. Took 14.5 hours on a NVIDIA K80.
-
-These are some of the better photos, but in general you will notice some splotchy photos here. I think this could be due to the network being too small or Adam learning rate decayed too quickly.
-
-![](./assets/test3sample1.png)
-
-![](./assets/test3sample2.png)
-
-![](./assets/test3sampels.png)
+* The code for this repo was initially based off of the [flow matching repo from facebook research](https://github.com/facebookresearch/flow_matching). Both Meta's project and this one are licensed under CC BY-NC 4.0 This code may only be used for noncommercial purposes and requires attribution of both Meta Inc. and Noah Schiro.
+* Patryk Chrabaszcz wrote the image preprocessing script and I made some modifications. Go check out his [repo](https://github.com/PatrykChrabaszcz/Imagenet32_Scripts). This code falls under MIT. See the header in `/image_resizer_imagent.py` for more information.
